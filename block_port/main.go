@@ -5,13 +5,15 @@ package main
 
 import (
 	"fmt"
+	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/rlimit"
 	"log"
 	"net"
-	"os"
-	"os/signal"
+	"net/netip"
 	"strconv"
+	"strings"
+	"time"
 )
 
 func main() {
@@ -55,13 +57,33 @@ func main() {
 	}
 	defer link.Close()
 
-	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, os.Interrupt)
-	log.Printf("Recieving incoming packets on %s..", interfaceName)
-	fmt.Println("Press Ctrl+C to stop...")
+	log.Printf("Attached XDP program to iface %q (index %d)", ifaceObj.Name, ifaceObj.Index)
+	log.Printf("Press Ctrl-C to exit and remove the program")
 
-	// Wait for a signal
-	<-stop
+	// Print the contents of the BPF hash map (source IP address -> packet count).
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+	for range ticker.C {
+		s, err := formatMapContents(objs.XdpStatsMap)
+		if err != nil {
+			log.Printf("Error reading map: %s", err)
+			continue
+		}
+		log.Printf("Drop packet count:\n%s", s)
+	}
+}
 
-	fmt.Println("Stopping...")
+func formatMapContents(m *ebpf.Map) (string, error) {
+	var (
+		sb  strings.Builder
+		key netip.Addr
+		val uint32
+	)
+	iter := m.Iterate()
+	for iter.Next(&key, &val) {
+		sourceIP := key // IPv4 source address in network byte order.
+		packetCount := val
+		sb.WriteString(fmt.Sprintf("\t%s => %d\n", sourceIP, packetCount))
+	}
+	return sb.String(), iter.Err()
 }
