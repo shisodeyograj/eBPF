@@ -1,3 +1,6 @@
+//go:build linux
+// +build linux
+
 package main
 
 import (
@@ -13,62 +16,48 @@ import (
 
 func main() {
 
-    var inputPort string
-    var ifName string
-	// Prompt the user to enter port number and network interface and set defaults if user input is empty
-	fmt.Print("Enter a port (press Enter for default value): ")
-    fmt.Scanln(&inputPort)
-    if inputPort == "" {
-		inputPort = "4040"
-	}
-    fmt.Println(inputPort)
-    fmt.Print("Enter network interface name (press Enter for default value): ")
-    fmt.Scanln(&ifName)
-    if ifName == "" {
-        ifName = "wlp2s0b1"
-    }
-    fmt.Println(ifName)
-	port, err := strconv.Atoi(inputPort)
-	if err != nil {
-        log.Fatal("Error parsing input:", err)
-	}
-
-    // Remove resource limits for kernels <5.11.
-    if err := rlimit.RemoveMemlock(); err != nil { 
-        log.Fatal("Removing memlock:", err)
+    if err := rlimit.RemoveMemlock(); err != nil {
+        panic(err)
     }
 
-    // Load the compiled eBPF ELF and load it into the kernel.
-    var objs drop_packetsObjects 
-    if err := loadDrop_packetsObjects(&objs, nil); err != nil {
-        log.Fatal("Loading eBPF objects:", err)
+    var port string
+    fmt.Print("Enter a port: ")
+    fmt.Scanln(&port)
+    fmt.Println("Port: %s", port)
+    portIn, err := strconv.Atoi(port)
+    if err != nil {
+	    panic(err)
+    }
+
+    var objs bpfObjects 
+    if err := loadBpfObjects(&objs, nil); err != nil {
+        panic(err)
     }
     defer objs.Close() 
 
-    // Update the port number in the eBPF map.
-    portNumber := uint32(port)
-    if err := objs.BpfPortMap.Update(uint32(0), &portNumber, 0); err != nil {
-        log.Fatal("Updating port map:", err)
+    portIn32 := uint32(portIn)
+    if err := objs.BpfPortMap.Update(uint32(0), &portIn32, 0); err != nil {
+        panic(err)
     }
 
-    iface, err := net.InterfaceByName(ifName)
+    interfaceName := "lo"
+    ifaceObj, err := net.InterfaceByName(interfaceName)
     if err != nil {
-        log.Fatalf("Getting interface %s: %s", ifName, err)
+        panic(err)
     }
 
-    // Attach drop_packets to the network interface.
     link, err := link.AttachXDP(link.XDPOptions{ 
-        Program:   objs.DropPackets,
-        Interface: iface.Index,
+        Program:   objs.BlockPort,
+        Interface: ifaceObj.Index,
     })
     if err != nil {
-        log.Fatal("Attaching XDP:", err)
+        panic(err)
     }
     defer link.Close() 
 
     stop := make(chan os.Signal, 1)
     signal.Notify(stop, os.Interrupt)
-    log.Printf("Recieving incoming packets on %s..", ifName)
+    log.Printf("Recieving incoming packets on %s..", interfaceName)
     fmt.Println("Press Ctrl+C to stop...")
 
     // Wait for a signal

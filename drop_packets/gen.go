@@ -1,3 +1,3 @@
 package main
 
-//go:generate go run github.com/cilium/ebpf/cmd/bpf2go drop_packets drop_packets_tcp.c
+//go:generate go run github.com/cilium/ebpf/cmd/bpf2go bpf block_port.c

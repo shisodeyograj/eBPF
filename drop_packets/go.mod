@@ -1,4 +1,4 @@
-module drop_packets
+module port_block
 
 go 1.22.2
 
