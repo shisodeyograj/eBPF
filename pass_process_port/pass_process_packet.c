@@ -1,12 +1,6 @@
 // +build ignore
 
-//#include <bpf/bpf_core_read.h>
-//#include <bpf/bpf_helpers.h>
-//#include <bpf/bpf_endian.h>
-//#include <linux/ip.h>
-
 #include <linux/if_ether.h>
-//#include <linux/ip.h>
 #include <linux/tcp.h>
 #include <linux/bpf.h>
 #include <netinet/in.h>
@@ -48,6 +42,7 @@ int bind_intercept(struct pt_regs *ctx,  const struct sockaddr *addr) {
     //u16 in_port = READ_KERN(in_addr->sin_port);
     //infostruct.lport= bpf_ntohs(in_port);
 
+    // Hradcoded port to be remove once issue for above commented code gets resolved
     __u32 in_port = 5000;
     __u64 p= bpf_get_current_pid_tgid();
     p = p >>32;
