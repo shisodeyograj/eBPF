@@ -47,7 +47,7 @@ func main() {
 	defer ticker.Stop()
 
 	var event bpfInfo
-	const key uint32 = 0
+	const key uint32 = 5000
 	for range ticker.C {
 		if err := objs.Eventmap.Lookup(key, &event); err != nil {
 			log.Println("reading map: %v", err)
