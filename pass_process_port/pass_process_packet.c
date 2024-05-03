@@ -1,14 +1,16 @@
 // +build ignore
 
-#include "vmlinux.h"
-#include <bpf/bpf_core_read.h>
+#include <linux/if_ether.h>
+#include <linux/tcp.h>
+#include <linux/bpf.h>
+#include <netinet/in.h>
 #include <bpf/bpf_helpers.h>
-#include <bpf/bpf_endian.h>
+#include <netinet/ip.h>
 
-#define TOTSZ (sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct tcphdr))
 
 char __license[] SEC("license") = "Dual MIT/GPL";
 
+#define TOTSZ (sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct tcphdr))
 #define READ_KERN(ptr)                                                                         \
     ({                                                                                         \
         typeof(ptr) _val;                                                                      \
@@ -18,60 +20,46 @@ char __license[] SEC("license") = "Dual MIT/GPL";
     })
 
 struct info {
-    u32 pid;
-    u8 comm[32];
-    u16 lport;
-    u16 rport;
+    __u32 pid;
+    __u8 comm[32];
 }x;
 
 struct bpf_map_def SEC("maps") eventmap = {
-	.type = BPF_MAP_TYPE_ARRAY,
-	.key_size = sizeof(u32),
+	.type = BPF_MAP_TYPE_HASH,
+	.key_size = sizeof(__u32),
     .value_size = sizeof(x),
     .max_entries = 3,
 };
 
 const struct info *unused __attribute__((unused));
-u32 key = 0;
 
 SEC("kprobe/security_socket_bind")
 int bind_intercept(struct pt_regs *ctx,  const struct sockaddr *addr) {
 
     struct info infostruct;
-    struct sock *sk = (struct sock *) PT_REGS_PARM1(ctx);
-    struct sock_common conn = READ_KERN(sk->__sk_common);
+    //struct sockaddr *address = (struct sockaddr *) PT_REGS_PARM2(ctx);
+    //struct sockaddr_in *in_addr = (struct sockaddr_in *) address;
+    //u16 in_port = READ_KERN(in_addr->sin_port);
+    //infostruct.lport= bpf_ntohs(in_port);
 
-    u64 p= bpf_get_current_pid_tgid();
+    // Hradcoded port to be remove once issue for above commented code gets resolved
+    __u32 in_port = 5000;
+    __u64 p= bpf_get_current_pid_tgid();
     p = p >>32;
-    
+
+    bpf_printk("Socket binding\n: ");   
     infostruct.pid=p;
     bpf_get_current_comm(&infostruct.comm,sizeof(infostruct.comm));
     
-    struct sockaddr *address = (struct sockaddr *) PT_REGS_PARM2(ctx);
-    struct sockaddr_in *in_addr = (struct sockaddr_in *) address;
-    
-    // checking bind port address
-    u16 x = READ_KERN(in_addr->sin_port);
-    infostruct.lport= bpf_ntohs(x);
-    infostruct.rport  = READ_KERN(sk->__sk_common.skc_num);
-
-    struct info *s;
-    s = bpf_map_lookup_elem(&eventmap,&key);
-    bool commcheck =  s->comm[0]=='m' && s->comm[1]=='y' && s->comm[2]=='p' && s->comm[3]=='r' && s->comm[4]=='o' && s->comm[5]=='c' && s->comm[6]=='e' && s->comm[7]=='s' && s->comm[8]=='s';
-    if (commcheck) {
-        key = key + 1;
-    	bpf_map_update_elem(&eventmap,&key,&infostruct,BPF_ANY);
-    }
+    bpf_map_update_elem(&eventmap,&in_port,&infostruct,BPF_ANY);
     return 0;
 }
 
 SEC("xdp")
 int xdp_prog(struct xdp_md *ctx) {
     
-    u16 passport= 5000;
     struct info *s;
-    s = bpf_map_lookup_elem(&eventmap,&key);
-    if (!s) return XDP_PASS;
+    __u32 pass_port = 5000;
 
     // Get current port
     void *data = (void *)(long)ctx->data;
@@ -85,20 +73,38 @@ int xdp_prog(struct xdp_md *ctx) {
         return XDP_PASS;
     }
 
-    __be16 port = tcph->dest;
-     
-    // Check this port is associated with process
-    u32 i;
-    for(i=0; i < 3; i++) {
-        key = i;
-        s = bpf_map_lookup_elem(&eventmap,&key);
-        if (!s) return XDP_PASS;
-        if (s->lport == port) {
-            if (htons(passport) != port) {
-	        return XDP_DROP; 
-            }
-            return XDP_PASS;
+    // 
+    __u32 port = ntohs(tcph->dest);
+    bpf_printk("Port=====: %u: ", port);
+   
+    s = bpf_map_lookup_elem(&eventmap, &port);
+    if (!s) {
+	    bpf_printk("Accept packet\n: ");
+	    return XDP_PASS;
+    }
+
+    // match process
+    __u8 check_process[] = {'m', 'y', 'p', 'r', 'o', 'c', 'e', 's', 's'};
+    __u16 len = 9;
+
+    __u16 i = 0;
+    __u16 match = 1;
+    for (__u16 i=0; i<9; i++) {
+        if (s->comm[i] == check_process[i]) {
+            match = 1;
         }
+        if (match != 1) break;
+    }
+    if (match == 1) {
+	bpf_printk("Process matched");
+	// Check for port	
+    	if (port == pass_port) {
+		bpf_printk("Accepting packets for pass ports");
+		return XDP_PASS;
+	} else {
+		bpf_printk("Dropping packets for process ports");
+	        return XDP_DROP;
+	}
     }
     return XDP_PASS;
 }

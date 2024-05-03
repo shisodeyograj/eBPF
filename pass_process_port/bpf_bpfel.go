@@ -14,10 +14,8 @@ import (
 )
 
 type bpfInfo struct {
-	Pid   uint32
-	Comm  [32]uint8
-	Lport uint16
-	Rport uint16
+	Pid  uint32
+	Comm [32]uint8
 }
 
 // loadBpf returns the embedded CollectionSpec for bpf.
